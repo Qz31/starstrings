@@ -5,6 +5,8 @@
 
 `index.html` · 27KB · 676 行 · 单文件
 
+**🔗 在线体验：https://qz31.github.io/starstrings/**　（建议用手机打开，音效需先点一下屏幕才会解禁）
+
 ---
 
 ## 这是什么

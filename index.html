@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<!--
+  星弦 · Starstrings
+  ────────────────────────────────────────────────────────────
+  一片你用手指弹奏的星河。三种模式 = 三种力场 = 三种音色：
+    星河  轨道椭圆 · 拨动星轨    火花音
+    星云  引力汇聚 · 按住吸附    嗡鸣
+    涟漪  网格静卧 · 投石成漪    水滴音
+  所有光与声皆为实时计算：粒子为 canvas 物理，音效为 WebAudio
+  振荡器合成（含程序生成的混响脉冲响应）—— 全文件零外部资源。
+  单文件 · 无依赖 · 自适应 · 可离线
+-->
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#04050a">
+<title>星弦 · Starstrings</title>
+<meta name="description" content="一片用手指弹奏的星河：三种力场，三种音色，零素材文件的单文件交互实验。">
+<meta name="apple-mobile-web-app-title" content="星弦">
+<style>
+  :root{
+    --ink:#eaf2ff;
+    --dim:rgba(234,242,255,.46);
+    --line:rgba(160,200,255,.16);
+    --glow:#7ab8ff;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{height:100%}
+  body{
+    margin:0;overflow:hidden;background:#04050a;color:var(--ink);
+    font-family:system-ui,-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    cursor:crosshair;
+  }
+
+  /* ---- 背景星云：纯 CSS 大色块 + 模糊，比 canvas 便宜 ---- */
+  .sky{position:fixed;inset:0;z-index:0;overflow:hidden}
+  .blob{
+    position:absolute;border-radius:50%;filter:blur(70px);opacity:.5;
+    mix-blend-mode:screen;will-change:transform;
+  }
+  .b1{width:62vmax;height:62vmax;left:-18vmax;top:-16vmax;
+      background:radial-gradient(circle at 40% 40%,#2b6cff,transparent 68%);
+      animation:float1 26s ease-in-out infinite}
+  .b2{width:54vmax;height:54vmax;right:-16vmax;bottom:-14vmax;
+      background:radial-gradient(circle at 60% 60%,#c04cff,transparent 68%);
+      animation:float2 32s ease-in-out infinite}
+  .b3{width:44vmax;height:44vmax;left:32%;top:38%;
+      background:radial-gradient(circle at 50% 50%,#12e0c8,transparent 70%);
+      opacity:.34;animation:float3 38s ease-in-out infinite}
+  @keyframes float1{0%,100%{transform:translate3d(0,0,0) scale(1)}50%{transform:translate3d(9vmax,7vmax,0) scale(1.14)}}
+  @keyframes float2{0%,100%{transform:translate3d(0,0,0) scale(1.06)}50%{transform:translate3d(-8vmax,-6vmax,0) scale(.94)}}
+  @keyframes float3{0%,100%{transform:translate3d(-6vmax,4vmax,0)}50%{transform:translate3d(7vmax,-7vmax,0)}}
+
+  #stage{position:fixed;inset:0;z-index:1;display:block;touch-action:none;user-select:none;-webkit-user-select:none}
+
+  /* ---- 暗角 ---- */
+  .vignette{
+    position:fixed;inset:0;z-index:2;pointer-events:none;
+    background:radial-gradient(ellipse at 50% 46%,transparent 42%,rgba(2,3,8,.72) 100%);
+  }
+  /* 极细扫描线，给一点“屏幕”质感 */
+  .scan{
+    position:fixed;inset:0;z-index:3;pointer-events:none;opacity:.16;
+    background:repeating-linear-gradient(to bottom,rgba(255,255,255,.055) 0 1px,transparent 1px 3px);
+  }
+
+  /* ---- UI ---- */
+  .ui{
+    position:fixed;inset:0;z-index:4;pointer-events:none;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    padding:calc(env(safe-area-inset-top) + 18px) 22px 0;
+  }
+  .title{
+    margin:0;font-size:clamp(44px,15vw,120px);font-weight:200;letter-spacing:.34em;
+    text-indent:.34em;line-height:1.05;
+    background:linear-gradient(180deg,#ffffff 0%,#bcd8ff 46%,#6d9dff 100%);
+    -webkit-background-clip:text;background-clip:text;color:transparent;
+    filter:drop-shadow(0 0 26px rgba(110,160,255,.55));
+    animation:rise 1.5s cubic-bezier(.2,.8,.2,1) both;
+  }
+  .sub{
+    margin:20px 0 0;font-size:clamp(11px,3.4vw,14px);letter-spacing:.22em;
+    color:var(--dim);text-align:center;animation:rise 1.5s .18s cubic-bezier(.2,.8,.2,1) both;
+  }
+  .clock{
+    margin-top:30px;font-variant-numeric:tabular-nums;
+    font-family:ui-monospace,"SF Mono",Menlo,monospace;
+    font-size:clamp(12px,3.6vw,15px);letter-spacing:.3em;color:rgba(210,230,255,.82);
+    animation:rise 1.5s .34s cubic-bezier(.2,.8,.2,1) both;
+  }
+  .clock .d{display:block;margin-top:7px;font-size:.78em;letter-spacing:.24em;color:var(--dim)}
+  @keyframes rise{from{opacity:0;transform:translateY(16px);filter:blur(7px)}to{opacity:1;transform:none;filter:none}}
+
+  /* ---- 底部模式切换 ---- */
+  .dock{
+    position:fixed;left:0;right:0;z-index:5;
+    bottom:calc(env(safe-area-inset-bottom) + 24px);
+    display:flex;gap:8px;justify-content:center;pointer-events:auto;
+    animation:rise 1.5s .5s cubic-bezier(.2,.8,.2,1) both;
+  }
+  .dock button{
+    appearance:none;border:1px solid var(--line);border-radius:999px;
+    background:rgba(140,180,255,.05);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    color:var(--dim);font:inherit;font-size:12.5px;letter-spacing:.16em;
+    padding:9px 16px;transition:.28s ease;cursor:pointer;
+  }
+  .dock button.on{
+    color:#fff;border-color:rgba(150,200,255,.5);
+    background:linear-gradient(180deg,rgba(120,170,255,.28),rgba(120,170,255,.1));
+    box-shadow:0 0 22px rgba(110,160,255,.4),inset 0 0 14px rgba(160,200,255,.16);
+  }
+  .hint{
+    position:fixed;left:0;right:0;z-index:5;text-align:center;pointer-events:none;
+    bottom:calc(env(safe-area-inset-bottom) + 78px);
+    font-size:11px;letter-spacing:.26em;color:rgba(200,220,255,.3);
+    animation:breathe 3.6s ease-in-out infinite;
+  }
+  @keyframes breathe{0%,100%{opacity:.28}50%{opacity:.8}}
+
+  .snd{
+    position:fixed;top:calc(env(safe-area-inset-top) + 14px);right:16px;z-index:6;
+    width:42px;height:42px;border-radius:50%;appearance:none;cursor:pointer;
+    border:1px solid var(--line);background:rgba(140,180,255,.05);
+    backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    color:rgba(210,230,255,.78);font-size:16px;line-height:1;
+    display:grid;place-items:center;transition:.25s ease;padding:0;
+    animation:rise 1.5s .6s cubic-bezier(.2,.8,.2,1) both;
+  }
+  .snd.off{color:rgba(210,230,255,.3)}
+  .snd:active{transform:scale(.9)}
+
+  @media (prefers-reduced-motion:reduce){
+    .blob,.hint{animation:none}
+  }
+</style>
+</head>
+<body>
+<div class="sky"><i class="blob b1"></i><i class="blob b2"></i><i class="blob b3"></i></div>
+<canvas id="stage"></canvas>
+<div class="vignette"></div>
+<div class="scan"></div>
+<button class="snd" id="snd" aria-label="音效开关" title="音效开关">🔊</button>
+
+<div class="ui">
+  <h1 class="title">星弦</h1>
+  <p class="sub">触碰屏幕 · 惊起一片星尘</p>
+  <div class="clock"><span id="t">--:--:--</span><span class="d" id="dd">—</span></div>
+</div>
+
+<div class="hint" id="hint">拖动 = 扰动 &nbsp;·&nbsp; 点按 = 爆发</div>
+<div class="dock">
+  <button data-mode="galaxy" class="on">星河</button>
+  <button data-mode="nebula">星云</button>
+  <button data-mode="ripple">涟漪</button>
+</div>
+
+<script>
+(() => {
+  "use strict";
+  const cv = document.getElementById("stage");
+  const ctx = cv.getContext("2d", { alpha: true });
+  const REDUCED = matchMedia("(prefers-reduced-motion:reduce)").matches;
+
+  let W = 0, H = 0, DPR = 1, CX = 0, CY = 0;
+  let particles = [], stars = [], waves = [], motes = [];
+  let pointer = { x: -9999, y: -9999, active: false };
+  let mode = "galaxy";
+  let t = 0, last = performance.now();
+
+  /* 预渲染发光贴图：每帧 drawImage 远比逐点 createRadialGradient 便宜 */
+  const SPR = 64;
+  const sprites = {};
+  function sprite(hue) {
+    if (sprites[hue]) return sprites[hue];
+    const c = document.createElement("canvas");
+    c.width = c.height = SPR;
+    const g = c.getContext("2d");
+    const grd = g.createRadialGradient(SPR/2, SPR/2, 0, SPR/2, SPR/2, SPR/2);
+    grd.addColorStop(0,    `hsla(${hue},100%,96%,1)`);
+    grd.addColorStop(0.18, `hsla(${hue},100%,78%,.86)`);
+    grd.addColorStop(0.45, `hsla(${hue},92%,60%,.26)`);
+    grd.addColorStop(1,    `hsla(${hue},90%,55%,0)`);
+    g.fillStyle = grd;
+    g.beginPath(); g.arc(SPR/2, SPR/2, SPR/2, 0, Math.PI*2); g.fill();
+    return (sprites[hue] = c);
+  }
+  const HUES = [205, 220, 265, 300, 40];
+
+  const MAXV = 10;   // 每帧最大位移(px)，约 600px/s
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+
+  /* ============ 音效：WebAudio 实时合成，零素材文件 ============
+     全部由振荡器 + 程序生成噪声/脉冲响应构成：
+       drop  涟漪模式点按 —— 水滴（正弦下滑 + 带通噪声瞬态）
+       spark 星河/星云点按 —— 火花（五声音阶随机取音的短促 blip 组）
+       blip  模式切换 —— 柔和双音提示
+       drone 星云按住 —— 低频引力嗡鸣，松手淡出
+     音高按触点 Y 归一化选取，声像按 X 定位，形成「画面即乐器」。 */
+  const AudioFX = (() => {
+    let ctx = null, master = null, verb = null, noiseBuf = null;
+    let voices = 0, lastAt = -1e9, drone = null;
+    let on = true;
+    try { on = localStorage.getItem("galaxy.sound") !== "0"; } catch (e) {}
+
+    // 大调五声音阶（两个八度）—— 随机取音也不会出现不协和
+    const SCALE = [];
+    for (let k = 0; k < 10; k++) {
+      SCALE.push(220 * Math.pow(2, [0, 2, 4, 7, 9][k % 5] / 12 + Math.floor(k / 5)));
+    }
+
+    // 程序生成混响脉冲响应：噪声 × 指数衰减，双声道去相关
+    function makeIR(c, dur, decay) {
+      const n = Math.max(1, Math.floor(c.sampleRate * dur));
+      const buf = c.createBuffer(2, n, c.sampleRate);
+      for (let ch = 0; ch < 2; ch++) {
+        const d = buf.getChannelData(ch);
+        for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, decay);
+      }
+      return buf;
+    }
+    function makeNoise(c) {
+      const n = Math.floor(c.sampleRate * 1.2);
+      const buf = c.createBuffer(1, n, c.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < n; i++) d[i] = Math.random() * 2 - 1;
+      return buf;
+    }
+
+    function init() {
+      if (ctx) return ctx;
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return null;
+      ctx = new AC();
+      const lp = ctx.createBiquadFilter();
+      lp.type = "lowpass"; lp.frequency.value = 8200; lp.Q.value = 0.4;
+      lp.connect(ctx.destination);
+      master = ctx.createGain();
+      master.gain.value = on ? 0.5 : 0.0001;
+      master.connect(lp);
+      if (ctx.createConvolver) {
+        verb = ctx.createConvolver();
+        verb.buffer = makeIR(ctx, 1.8, 2.8);
+        const vg = ctx.createGain(); vg.gain.value = 0.3;
+        verb.connect(vg).connect(lp);
+      }
+      noiseBuf = makeNoise(ctx);
+      return ctx;
+    }
+    // 必须在用户手势里调用（iOS 音频解禁）
+    function wake() {
+      const c = init();
+      if (!c) return null;
+      if (c.state === "suspended" && c.resume) c.resume();
+      return c;
+    }
+    // 统一出口：可选声像 + 干湿比例
+    function out(node, pan, wet) {
+      let tail = node;
+      if (pan != null && ctx.createStereoPanner) {
+        const p = ctx.createStereoPanner();
+        p.pan.value = clamp(pan, -1, 1);
+        tail.connect(p); tail = p;
+      }
+      tail.connect(master);
+      if (verb && wet > 0) {
+        const w = ctx.createGain(); w.gain.value = wet;
+        tail.connect(w).connect(verb);
+      }
+    }
+    // 语音数/频率限流：快速连点不炸
+    // 注意：必须用 performance.now() 计时。AudioContext 未解禁时 currentTime 恒为 0，
+    // 用它会算出间隔 0，导致「第一次点按就被永久静音」。
+    function spend() {
+      const now = performance.now();
+      if (voices > 30 || (now - lastAt) < 40) return false;
+      lastAt = now; voices++;
+      setTimeout(() => { voices = Math.max(0, voices - 1); }, 1500);
+      return true;
+    }
+    function note(freq, t, dur, type, gain, pan, wet, glideTo) {
+      const o = ctx.createOscillator();
+      o.type = type || "sine";
+      o.frequency.setValueAtTime(freq, t);
+      if (glideTo) o.frequency.exponentialRampToValueAtTime(glideTo, t + dur * 0.9);
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(gain, t + 0.006);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      o.connect(g); out(g, pan, wet);
+      o.start(t); o.stop(t + dur + 0.05);
+      return o;
+    }
+    function noise(t, dur, freq, gain, pan, wet) {
+      const src = ctx.createBufferSource();
+      src.buffer = noiseBuf;
+      src.playbackRate.value = 1;
+      const bp = ctx.createBiquadFilter();
+      bp.type = "bandpass"; bp.frequency.value = freq; bp.Q.value = 1.1;
+      const g = ctx.createGain();
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(gain, t + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+      src.connect(bp).connect(g); out(g, pan, wet);
+      src.start(t, Math.random() * 0.4); src.stop(t + dur + 0.05);
+    }
+    const pick = (xn, yn, lo, hi) => {
+      const i = clamp(Math.round((1 - yn) * (hi - lo) + xn * (hi - lo)) + lo, lo, hi);
+      return SCALE[i];
+    };
+
+    return {
+      get enabled() { return on; },
+      get ctxState() { return ctx ? ctx.state : "none"; },
+      setEnabled(v) {
+        on = !!v;
+        try { localStorage.setItem("galaxy.sound", on ? "1" : "0"); } catch (e) {}
+        if (!on) { this.droneEnd(); return; }
+        const c = wake(); if (c && master) {
+          master.gain.cancelScheduledValues(c.currentTime);
+          master.gain.setTargetAtTime(0.5, c.currentTime, 0.05);
+        }
+      },
+      // 涟漪：水滴 —— 正弦从高处滑落 + 一层"打水"噪声瞬态
+      drop(xn, yn) {
+        const c = wake(); if (!c || !on || !spend()) return;
+        const t = c.currentTime + 0.005;
+        const pan = (xn * 2 - 1) * 0.6;
+        const f = pick(xn, yn, 3, 8);
+        note(f * 1.9, t, 0.9, "sine", 0.24, pan, 0.55, f * 0.6);
+        note(f * 3.02, t, 0.16, "sine", 0.05, pan, 0.3);
+        noise(t, 0.09, 2400 + xn * 1800, 0.05, pan, 0.35);
+      },
+      // 星河 / 星云：火花 —— 2~3 个短促 blip 叠成一小簇
+      spark(xn, yn) {
+        const c = wake(); if (!c || !on || !spend()) return;
+        const t = c.currentTime + 0.005;
+        const pan = (xn * 2 - 1) * 0.6;
+        const n = 2 + ((Math.random() * 2) | 0);
+        noise(t, 0.07, 3200, 0.035, pan, 0.3);
+        for (let i = 0; i < n; i++) {
+          const f = pick(xn, yn, 5, 9) * (i ? rnd(1.0, 1.02) : 1);
+          note(f, t + i * rnd(0.02, 0.055), rnd(0.18, 0.34),
+               i % 2 ? "triangle" : "sine", 0.14 - i * 0.03, pan, 0.45, f * 0.94);
+        }
+      },
+      // 模式切换：柔和双音
+      blip() {
+        const c = wake(); if (!c || !on) return;
+        const t = c.currentTime + 0.005;
+        note(SCALE[2], t, 0.5, "sine", 0.12, -0.1, 0.5);
+        note(SCALE[5], t + 0.06, 0.6, "sine", 0.1, 0.1, 0.5);
+      },
+      // 星云按住：低频引力嗡鸣（三个分音 + 低通）
+      droneStart(xn, yn) {
+        const c = wake(); if (!c || !on || drone) return;
+        const t = c.currentTime;
+        const base = 55 * Math.pow(2, Math.round((1 - yn) * 3) / 12);
+        const g = c.createGain();
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(0.1, t + 0.5);
+        const lp = c.createBiquadFilter();
+        lp.type = "lowpass"; lp.frequency.setValueAtTime(260, t);
+        lp.frequency.linearRampToValueAtTime(620, t + 1.6); lp.Q.value = 3;
+        const oscs = [1, 1.5, 2.006].map((m, i) => {
+          const o = c.createOscillator();
+          o.type = i === 2 ? "sine" : "triangle";
+          o.frequency.setValueAtTime(base * m, t);
+          o.frequency.linearRampToValueAtTime(base * m * 1.06, t + 2.4);
+          const og = c.createGain(); og.gain.value = i === 2 ? 0.22 : 0.5;
+          o.connect(og).connect(lp); o.start(t);
+          return o;
+        });
+        lp.connect(g); out(g, (xn * 2 - 1) * 0.4, 0.35);
+        drone = { oscs, g };
+      },
+      droneEnd() {
+        if (!drone || !ctx) { drone = null; return; }
+        const t = ctx.currentTime, d = drone; drone = null;
+        d.g.gain.cancelScheduledValues(t);
+        d.g.gain.setValueAtTime(Math.max(d.g.gain.value, 0.0001), t);
+        d.g.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+        d.oscs.forEach(o => { try { o.stop(t + 0.55); } catch (e) {} });
+      }
+    };
+  })();
+
+  function build() {
+    CX = W / 2; CY = H / 2;
+    const area = W * H;
+    const N = clamp(Math.round(area / 2600), 90, REDUCED ? 220 : 620);
+
+    // 网格基准（涟漪模式用）
+    let cols = Math.max(4, Math.round(Math.sqrt(N * W / H)));
+    let rows = Math.max(4, Math.round(N / cols));
+    const gw = W / (cols + 1), gh = H / (rows + 1);
+
+    particles = [];
+    for (let i = 0; i < N; i++) {
+      const col = i % cols, row = Math.floor(i / cols) % rows;
+      const gx = (col + 1) * gw, gy = (row + 1) * gh;
+      const hue = HUES[(Math.random() * HUES.length) | 0];
+      particles.push({
+        x: rnd(0, W), y: rnd(0, H), vx: 0, vy: 0,
+        gx, gy,
+        a: Math.random() * Math.PI * 2,           // 极角
+        r: Math.pow(Math.random(), 0.62),         // 归一化半径（外密内疏），0~1
+        spin: rnd(0.00022, 0.00082) * (Math.random() < .12 ? -1 : 1),
+        wob: rnd(0.6, 2.6), ph: Math.random() * Math.PI * 2,
+        size: rnd(8, 42),
+        hue,
+        o: rnd(0.28, 1),
+        gs: rnd(0.4, 1.5)   // 弹簧强度
+      });
+    }
+
+    // 背景星尘（无物理，只闪烁）
+    stars = [];
+    const S = clamp(Math.round(area / 9000), 60, 260);
+    for (let i = 0; i < S; i++) {
+      stars.push({ x: Math.random()*W, y: Math.random()*H, s: rnd(0.4,1.5), ph: Math.random()*6.28, sp: rnd(0.6,2.4) });
+    }
+    motes = [];
+
+    // 让首帧就在合理位置
+    for (const p of particles) {
+      const d = target(p, 0);
+      p.x = d.x; p.y = d.y;
+    }
+  }
+
+  /* ============ 三种模式的目标位 ============ */
+  function target(p, time) {
+    if (mode === "nebula") {
+      const w = time * 0.00042 * p.wob;
+      return { x: p.gx + Math.sin(w + p.ph) * 46,
+               y: p.gy + Math.cos(w * 1.31 + p.ph) * 46 };
+    }
+    // galaxy：椭圆半径按屏幕宽高归一 —— 星系铺满视口，而不是超出边界被裁掉
+    const ang = p.a + time * p.spin;
+    const r = p.r * (1 + 0.05 * Math.sin(time * 0.0006 + p.ph));
+    const ex = Math.cos(ang) * r * W * 0.42;
+    const ey = Math.sin(ang) * r * H * 0.40;
+    const c = Math.cos(-0.25), s = Math.sin(-0.25);
+    return { x: CX + ex * c - ey * s, y: CY + ex * s + ey * c };
+  }
+
+  /* ============ 物理步进 ============ */
+  function step(dt) {
+    const R = Math.min(W, H) * 0.42;
+    for (const p of particles) {
+      let tx, ty;
+      if (mode === "ripple") {
+        tx = p.gx; ty = p.gy;
+        for (const w of waves) {
+          const dx = p.gx - w.x, dy = p.gy - w.y;
+          const d = Math.hypot(dx, dy) || 0.001;
+          const front = (t - w.t0) * 0.50;
+          const rel = d - front;
+          if (rel > -220 && rel < 220) {
+            const k = Math.exp(-(rel * rel) / (2 * 120 * 120)) * Math.cos(rel / 34)
+                    * 84 * Math.exp(-(t - w.t0) / 3200);
+            tx += dx / d * k; ty += dy / d * k;
+          }
+        }
+      } else {
+        const d = target(p, t); tx = d.x; ty = d.y;
+      }
+
+      p.vx += (tx - p.x) * 0.0014 * p.gs * dt;
+      p.vy += (ty - p.y) * 0.0014 * p.gs * dt;
+
+      if (pointer.active) {
+        const dx = p.x - pointer.x, dy = p.y - pointer.y;
+        const d = Math.hypot(dx, dy) || 0.001;
+        const PR = mode === "nebula" ? R * 1.8 : R;   // 引力作用范围更大
+        if (d < PR) {
+          // 注意：这是「加速度」，量级必须是每帧几个像素级；
+          // 若当冲量用（*132），阻尼收敛后单次可位移上千像素，粒子会被弹飞。
+          const f = (1 - d / PR) * (mode === "nebula" ? -1.8 : 1.2) * dt / 16;
+          // 指针正中心时 d≈0，方向退化 → 用极角兜底，避免抖动
+          const ux = d > 1 ? dx / d : Math.cos(p.a), uy = d > 1 ? dy / d : Math.sin(p.a);
+          p.vx += ux * f; p.vy += uy * f;
+        }
+      }
+
+      const damp = Math.pow(0.90, dt / 16);
+      p.vx *= damp; p.vy *= damp;
+
+      // 限速：约 600px/s，既灵动又不失控
+      const sp = Math.hypot(p.vx, p.vy);
+      if (sp > MAXV) { p.vx = p.vx / sp * MAXV; p.vy = p.vy / sp * MAXV; }
+
+      p.x += p.vx; p.y += p.vy;
+    }
+
+    for (let i = motes.length - 1; i >= 0; i--) {
+      const m = motes[i];
+      m.vx *= Math.pow(0.955, dt / 16); m.vy *= Math.pow(0.955, dt / 16);
+      m.x += m.vx * dt / 16; m.y += m.vy * dt / 16;
+      m.life -= dt / m.ttl;
+      if (m.life <= 0) motes.splice(i, 1);
+    }
+  }
+
+  /* ============ 绘制 ============ */
+  function draw() {
+    // 用 destination-out 淡出，保留 canvas 透明 → 背后的 CSS 星云透出来
+    ctx.globalCompositeOperation = "destination-out";
+    ctx.fillStyle = "rgba(0,0,0,0.26)";
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = "lighter";
+
+    // 背景星尘
+    for (const s of stars) {
+      const a = 0.16 + 0.5 * (0.5 + 0.5 * Math.sin(t * 0.001 * s.sp + s.ph));
+      ctx.fillStyle = `rgba(220,235,255,${a.toFixed(3)})`;
+      ctx.fillRect(s.x, s.y, s.s, s.s);
+    }
+
+    // 主粒子
+    for (const p of particles) {
+      const tw = 0.62 + 0.38 * Math.sin(t * 0.0016 + p.ph);
+      ctx.globalAlpha = clamp(p.o * tw, 0, 1);
+      const s = p.size;
+      ctx.drawImage(sprite(p.hue), p.x - s / 2, p.y - s / 2, s, s);
+    }
+
+    // 爆发尘
+    for (const m of motes) {
+      ctx.globalAlpha = clamp(m.life, 0, 1) * 0.9;
+      const s = m.size * (0.4 + m.life);
+      ctx.drawImage(sprite(m.hue), m.x - s / 2, m.y - s / 2, s, s);
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = "source-over";
+  }
+
+  /* ============ 主循环 ============ */
+  function frame(now) {
+    let dt = now - last; last = now;
+    if (dt > 60) dt = 60;
+    t += dt;
+    // 指针静默一段时间后自动失效
+    if (pointer.active && pointer.idle !== undefined) {
+      pointer.idle += dt;
+      if (pointer.idle > 1400 && !pointer.down) pointer.active = false;
+    }
+    // 丢弃过期涟漪
+    while (waves.length && t - waves[0].t0 > 4000) waves.shift();
+    step(dt);
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  /* ============ 交互 ============ */
+  function burst(x, y) {
+    const n = REDUCED ? 12 : 30;
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const sp = rnd(1.2, 8.5);
+      motes.push({
+        x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+        life: 1, ttl: rnd(620, 1500),
+        hue: HUES[(Math.random() * HUES.length) | 0],
+        size: rnd(7, 26)
+      });
+    }
+    if (motes.length > 420) motes.splice(0, motes.length - 420);
+  }
+
+  function onDown(x, y) {
+    pointer.x = x; pointer.y = y; pointer.active = true;
+    pointer.down = true; pointer.idle = 0;
+    const xn = x / W, yn = y / H;                 // 归一化坐标 → 决定音高与声像
+    if (mode === "ripple") {
+      waves.push({ x, y, t0: t });
+      AudioFX.drop(xn, yn);
+    } else {
+      burst(x, y);
+      AudioFX.spark(xn, yn);
+      if (mode === "nebula") AudioFX.droneStart(xn, yn);
+    }
+  }
+
+  cv.addEventListener("pointerdown", e => {
+    cv.setPointerCapture?.(e.pointerId);
+    onDown(e.clientX, e.clientY);
+    if (navigator.vibrate) navigator.vibrate(6);
+  }, { passive: true });
+
+  cv.addEventListener("pointermove", e => {
+    pointer.x = e.clientX; pointer.y = e.clientY;
+    pointer.active = true; pointer.idle = 0;
+  }, { passive: true });
+
+  const up = () => {
+    pointer.down = false; pointer.idle = 0;
+    if (mode !== "nebula") pointer.active = false;
+    AudioFX.droneEnd();
+  };
+  cv.addEventListener("pointerup", up, { passive: true });
+  cv.addEventListener("pointercancel", up, { passive: true });
+  cv.addEventListener("pointerleave", up, { passive: true });
+
+  const HINTS = {
+    galaxy: "拖动 = 扰动星轨 &nbsp;·&nbsp; 点按 = 爆发",
+    nebula: "按住 = 引力汇聚 &nbsp;·&nbsp; 点按 = 爆发",
+    ripple: "点按 = 投石入水"
+  };
+  document.querySelectorAll(".dock button").forEach(b => {
+    b.addEventListener("click", () => {
+      document.querySelectorAll(".dock button").forEach(x => x.classList.remove("on"));
+      b.classList.add("on");
+      mode = b.dataset.mode;
+      waves.length = 0;
+      AudioFX.droneEnd();
+      AudioFX.blip();
+      document.getElementById("hint").innerHTML = HINTS[mode];
+      // 模式切换时给一次柔和过渡：把所有粒子速度清零，让弹簧自己收敛
+      for (const p of particles) { p.vx *= 0.05; p.vy *= 0.05; }
+    });
+  });
+
+  /* ---- 声音开关 ---- */
+  const sndBtn = document.getElementById("snd");
+  function paintSnd() {
+    sndBtn.textContent = AudioFX.enabled ? "🔊" : "🔇";
+    sndBtn.classList.toggle("off", !AudioFX.enabled);
+    sndBtn.setAttribute("aria-label", AudioFX.enabled ? "关闭音效" : "开启音效");
+  }
+  sndBtn.addEventListener("click", () => {
+    AudioFX.setEnabled(!AudioFX.enabled);
+    paintSnd();
+    if (AudioFX.enabled) AudioFX.blip();     // 开启时给个确认音
+  });
+  paintSnd();
+
+  /* ============ 时钟 ============ */
+  const WEEK = ["日", "一", "二", "三", "四", "五", "六"];
+  function tick() {
+    const d = new Date();
+    const p = n => String(n).padStart(2, "0");
+    document.getElementById("t").textContent = `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+    document.getElementById("dd").textContent =
+      `${d.getFullYear()} · ${p(d.getMonth() + 1)} · ${p(d.getDate())}　星期${WEEK[d.getDay()]}`;
+  }
+  tick(); setInterval(tick, 1000);
+
+  /* ============ 尺寸 ============ */
+  let rt = null;
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    cv.width = Math.round(W * DPR); cv.height = Math.round(H * DPR);
+    cv.style.width = W + "px"; cv.style.height = H + "px";
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    build();
+  }
+  window.addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(resize, 160); });
+  window.addEventListener("orientationchange", () => { clearTimeout(rt); rt = setTimeout(resize, 260); });
+  window.addEventListener("visibilitychange", () => { last = performance.now(); });
+
+  resize();
+  // 先同步画一帧：后台标签页里 rAF 会被暂停，若无此步画布将是空的
+  step(16); draw();
+  requestAnimationFrame(frame);
+  // 页面重新可见时立刻补一帧，避免回到前台出现空白
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { last = performance.now(); step(16); draw(); } });
+})();
+</script>
+</body>
+</html>
